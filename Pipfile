@@ -14,6 +14,9 @@ pypianoroll = "*"
 pandas = "*"
 ipdb = "*"
 torchvision = "*"
+tensorflow = "*"
+keras = "*"
+music21 = "*"
 
 [requires]
 python_version = "3.7"
