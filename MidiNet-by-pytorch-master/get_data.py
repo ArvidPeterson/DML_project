@@ -1,5 +1,5 @@
 import xml.etree.ElementTree as ET 
-import xmldataset
+# import xmldataset
 import os 
 from os.path import basename, dirname, join, exists, splitext
 import ipdb
@@ -59,7 +59,6 @@ def build_matrix(note_list_all_c,dur_list_all_c):
                 new_prev[1:, :, :, :] = new[0:new.shape[0]-1, :, :, :]            
                 data_x.append(new)
                 prev_x.append(new_prev)  
-
     data_x = np.vstack(data_x)
     prev_x = np.vstack(prev_x)
 
