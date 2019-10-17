@@ -12,6 +12,8 @@ matplotlib = "*"
 py-midi = "*"
 pypianoroll = "*"
 pandas = "*"
+ipdb = "*"
+torchvision = "*"
 
 [requires]
 python_version = "3.7"
