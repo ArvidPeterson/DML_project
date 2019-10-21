@@ -24,7 +24,7 @@ def get_notes(n_notes=3):
         print("Parsing %s" % file)
 
         notes_to_parse = None
-
+        # TODO: files are too long
         try: # file has instrument parts
             s2 = instrument.partitionByInstrument(midi)
             notes_to_parse = s2.parts[0].recurse() 
@@ -148,6 +148,7 @@ class GAN():
         self.discriminator.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
         # Build the generator
+        import pdb; pdb.set_trace()
         self.generator = self.build_generator()
 
         # The generator takes noise as input and generates note sequences
@@ -209,7 +210,7 @@ class GAN():
         # Load and convert the data
         notes = get_notes()
         n_vocab = len(set(notes))
-        X_train, y_train = prepare_sequences(notes, n_vocab)
+        X_train, _ = prepare_sequences(notes, n_vocab)
 
         # Adversarial ground truths
         real = np.ones((batch_size, 1))
@@ -277,11 +278,11 @@ class GAN():
         plt.close()
 
 if __name__ == '__main__':
-  #gan = GAN(rows=100)    
-  #gan.train(epochs=5000, batch_size=32, sample_interval=1)
-  get_notes()
-  import pdb; pdb.set_trace()
-  print('done')
+    gan = GAN(rows=100)    
+    # gan.train(epochs=5000, batch_size=32, sample_interval=1)
+    import pdb; pdb.set_trace()
+    # get_notes()
+    print('done')
 
 
 
