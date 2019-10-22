@@ -5,13 +5,18 @@ import numpy as np
 import pickle
 import glob
 from music21 import converter, instrument, note, chord, stream
-
-from keras.layers import Input, Dense, Reshape, Dropout, CuDNNLSTM, Bidirectional, LSTM
-from keras.layers import BatchNormalization, Activation, ZeroPadding2D
-from keras.layers.advanced_activations import LeakyReLU
-from keras.models import Sequential, Model
-from keras.optimizers import Adam
-from keras.utils import np_utils
+# from keras.layers import Input, Dense, Reshape, Dropout, CuDNNLSTM, Bidirectional, LSTM
+# from keras.layers import BatchNormalization, Activation, ZeroPadding2D
+# from keras.layers.advanced_activations import LeakyReLU
+# from keras.models import Sequential, Model
+# from keras.optimizers import Adam
+# from keras.utils import np_utils
+import torch
+import torch_GAN
+import torch.nn as nn
+import torch.optim as optim
+import torch.functional as F
+import os
 
 def to_categorical(y, num_classes=None, dtype='float32'):
     """Converts a class vector (integers) to binary class matrix.
@@ -41,6 +46,7 @@ def to_categorical(y, num_classes=None, dtype='float32'):
            [ 1.,  0.,  0.]], dtype=float32)
     ```
     """
+    # stolen KERAS sourcecode
 
     y = np.array(y, dtype='int')
     input_shape = y.shape
@@ -59,11 +65,26 @@ def to_categorical(y, num_classes=None, dtype='float32'):
 def get_notes(n_notes=3):
     """ Get all the notes and chords from the midi files """
     notes = []
-
-    for ii, file in enumerate(glob.glob("midi-lstm-gan-master/Pokemon MIDIs/*.mid")):
+    # import pdb; pdb.set_trace()
+    for ii, file in enumerate(glob.glob("data/maestro-v2.0.0/2004/*.midi")):
         if ii > n_notes:
             break
-        midi = converter.parse(file)
+        pickle_file_name = file[:-4] + 'pkl'
+
+        if os.path.isfile(pickle_file_name):
+            print(f'Reading parsed file: {pickle_file_name}')
+            with open(pickle_file_name, 'rb') as handle:
+                midi = pickle.load(handle)
+        else:
+            midi = converter.parse(file)
+
+            with open(pickle_file_name, 'wb') as handle:
+                print(f'writing parsed file: {pickle_file_name}')
+                unserialized_data = pickle.dump(midi, 
+                    handle, 
+                    protocol=pickle.HIGHEST_PROTOCOL
+                    )
+
 
         print("Parsing %s" % file)
 
@@ -110,15 +131,15 @@ def prepare_sequences(notes, n_vocab):
     
     # Normalize input between -1 and 1
     network_input = (network_input - float(n_vocab)/2) / (float(n_vocab)/2)
-    import pdb; pdb.set_trace()
-    network_output = np_utils.to_categorical(network_output)
+    # import pdb; pdb.set_trace()
+    network_output = to_categorical(network_output)
 
     return (network_input, network_output)
 
 def generate_notes(model, network_input, n_vocab):
     """ Generate notes from the neural network based on a sequence of notes """
     # pick a random sequence from the input as a starting point for the prediction
-    start = numpy.random.randint(0, len(network_input)-1)
+    start = np.random.randint(0, len(network_input)-1)
     
     # Get pitch names and store in a dictionary
     pitchnames = sorted(set(item for item in notes))
@@ -129,16 +150,16 @@ def generate_notes(model, network_input, n_vocab):
 
     # generate 500 notes
     for note_index in range(500):
-        prediction_input = numpy.reshape(pattern, (1, len(pattern), 1))
+        prediction_input = np.reshape(pattern, (1, len(pattern), 1))
         prediction_input = prediction_input / float(n_vocab)
 
         prediction = model.predict(prediction_input, verbose=0)
 
-        index = numpy.argmax(prediction)
+        index = np.argmax(prediction)
         result = int_to_note[index]
         prediction_output.append(result)
         
-        pattern = numpy.append(pattern,index)
+        pattern = np.append(pattern,index)
         #pattern.append(index)
         pattern = pattern[1:len(pattern)]
 
@@ -177,160 +198,109 @@ def create_midi(prediction_output, filename):
     midi_stream = stream.Stream(output_notes)
     midi_stream.write('midi', fp='{}.mid'.format(filename))
 
-class GAN():
-    def __init__(self, rows):
-        self.seq_length = rows
-        self.seq_shape = (self.seq_length, 1)
-        self.latent_dim = 1000
-        self.disc_loss = []
-        self.gen_loss =[]
+
+class Discriminator(nn.Module):
+    def __init__(self, n_units):
+        super(Discriminator, self).__init__()
+        self.sequence_length = n_units
+        self.LSTM_hidden_dim = 512
+
+        # self.LSTM_1 = nn.LSTM(
+        #     self.sequence_length, 
+        #     self.LSTM_hidden_dim
+        #     )
+        # self.LSTM_2 = nn.LSTM(
+        #     self.LSTM_hidden_dim,
+        #     self.LSTM_hidden_dim,
+        #     bidirectional=True
+        #     )
+
+        self.LSTM = nn.LSTM(
+            input_size=self.sequence_length, 
+            hidden_size=self.LSTM_hidden_dim,
+            num_layers=2,
+            batch_first=True
+            )
+
+        self.linear_layers = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.LeakyReLU(),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+            )
+    
+    def forward(self, x):
+        # import pdb; pdb.set_trace()
+        hidden_1 = torch.zeros(self.sequence_length)
+        hidden_2 = torch.zeros(self.sequence_length)
+        out, (h1, h2) = self.LSTM(x, (hidden_1, hidden_2))
+
+        x = self.linear_layers(out)
+        return x
+
+
+class Generator(nn.Module):
+    def __init__(self, n_units):
+        super(Generator, self).__init__()
+        self.sequence_length = n_units
+
+        self.generating_layers = nn.Sequential(
+            nn.Linear(self.sequence_length, 256),
+            nn.LeakyReLU(),
+            # nn.BatchNorm1d(num_features=256), # TODO: Make batchnorm work at some time
+            nn.Linear(256, 1024),
+            nn.LeakyReLU(),
+            # nn.BatchNorm1d(num_features=1024),
+            nn.Linear(1024, self.sequence_length)
+        )
         
-        optimizer = Adam(0.0002, 0.5)
-
-        # Build and compile the discriminator
-        self.discriminator = self.build_discriminator()
-        self.discriminator.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
-
-        # Build the generator
-        import pdb; pdb.set_trace()
-        self.generator = self.build_generator()
-
-        # The generator takes noise as input and generates note sequences
-        z = Input(shape=(self.latent_dim,))
-        generated_seq = self.generator(z)
-
-        # For the combined model we will only train the generator
-        self.discriminator.trainable = False
-
-        # The discriminator takes generated images as input and determines validity
-        validity = self.discriminator(generated_seq)
-
-        # The combined model  (stacked generator and discriminator)
-        # Trains the generator to fool the discriminator
-        self.combined = Model(z, validity)
-        self.combined.compile(loss='binary_crossentropy', optimizer=optimizer)
-
-    def build_discriminator(self):
-
-        model = Sequential()
-        model.add(LSTM(512, input_shape=self.seq_shape, return_sequences=True))
-        model.add(Bidirectional(LSTM(512)))
-        model.add(Dense(512))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(256))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(1, activation='sigmoid'))
-        model.summary()
-        import pdb; pdb.set_trace()
-
-        seq = Input(shape=self.seq_shape)
-        validity = model(seq)
-
-        return Model(seq, validity)
-      
-    def build_generator(self):
-
-        model = Sequential()
-        model.add(Dense(256, input_dim=self.latent_dim))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(512))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(1024))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(np.prod(self.seq_shape), activation='tanh'))
-        model.add(Reshape(self.seq_shape))
-        model.summary()
+    def forward(self, x):
+        # import pdb; pdb.set_trace()
+        x = self.generating_layers(x)
+        return x
         
-        noise = Input(shape=(self.latent_dim,))
-        seq = model(noise)
+class torchGAN():
 
-        return Model(noise, seq)
+    def __init__(self, n_units):
+        self.sequence_length = n_units
+        
+        # create discriminator and generator 
+        self.discriminator = Discriminator(self.sequence_length)
+        self.generator = Generator(self.sequence_length)
 
-    def train(self, epochs, batch_size=128, sample_interval=50):
-
-        # Load and convert the data
-        notes = get_notes()
+    
+    def train(self, n_epochs, batch_size=128, sample_interval=50):
+        notes = get_notes(n_notes=3)
         n_vocab = len(set(notes))
         X_train, _ = prepare_sequences(notes, n_vocab)
-
+    
         # Adversarial ground truths
-        real = np.ones((batch_size, 1))
-        fake = np.zeros((batch_size, 1))
+        label_real = np.ones((batch_size, 1))
+        label_fake = np.zeros((batch_size, 1))
         
         # Training the model
-        for epoch in range(epochs):
+        for i_epoch in range(n_epochs):
 
             # Training the discriminator
             # Select a random batch of note sequences
             idx = np.random.randint(0, X_train.shape[0], batch_size)
             real_seqs = X_train[idx]
+            import pdb; pdb.set_trace()
+            print(f'epoch: {i_epoch}')
+    
+    def _generate(self):
+        pass
 
-            #noise = np.random.choice(range(484), (batch_size, self.latent_dim))
-            #noise = (noise-242)/242
-            noise = np.random.normal(0, 1, (batch_size, self.latent_dim))
-
-            # Generate a batch of new note sequences
-            gen_seqs = self.generator.predict(noise)
-
-            # Train the discriminator
-            d_loss_real = self.discriminator.train_on_batch(real_seqs, real)
-            d_loss_fake = self.discriminator.train_on_batch(gen_seqs, fake)
-            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
-
-            #  Training the Generator
-            noise = np.random.normal(0, 1, (batch_size, self.latent_dim))
-
-            # Train the generator (to have the discriminator label samples as real)
-            g_loss = self.combined.train_on_batch(noise, real)
-
-            # Print the progress and save into loss lists
-            if epoch % sample_interval == 0:
-              print ("%d [D loss: %f, acc.: %.2f%%] [G loss: %f]" % (epoch, d_loss[0], 100*d_loss[1], g_loss))
-              self.disc_loss.append(d_loss[0])
-              self.gen_loss.append(g_loss)
-        
-        self.generate(notes)
-        self.plot_loss()
-        
-    def generate(self, input_notes):
-        # Get pitch names and store in a dictionary
-        notes = input_notes
-        pitchnames = sorted(set(item for item in notes))
-        int_to_note = dict((number, note) for number, note in enumerate(pitchnames))
-        
-        # Use random noise to generate sequences
-        noise = np.random.normal(0, 1, (1, self.latent_dim))
-        predictions = self.generator.predict(noise)
-        
-        pred_notes = [x*242+242 for x in predictions[0]]
-        pred_notes = [int_to_note[int(x)] for x in pred_notes]
-        
-        create_midi(pred_notes, 'gan_final')
-        
-    def plot_loss(self):
-        plt.plot(self.disc_loss, c='red')
-        plt.plot(self.gen_loss, c='blue')
-        plt.title("GAN Loss per Epoch")
-        plt.legend(['Discriminator', 'Generator'])
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.savefig('GAN_Loss_per_Epoch_final.png', transparent=True)
-        plt.close()
-
+    def _discriminate(self):
+        pass
+    
 if __name__ == '__main__':
 
-    gan = GAN(rows=100)    
-    # gan.train(epochs=5000, batch_size=32, sample_interval=1)
-    import pdb; pdb.set_trace()
-    # get_notes()
+    gan = torchGAN(n_units=50)
+    gan.train(n_epochs=3)
+
     print('done')
-
-
-
-
-
+    
 

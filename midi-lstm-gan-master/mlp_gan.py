@@ -5,7 +5,6 @@ import numpy as np
 import pickle
 import glob
 from music21 import converter, instrument, note, chord, stream
-
 from keras.layers import Input, Dense, Reshape, Dropout, CuDNNLSTM, Bidirectional, LSTM
 from keras.layers import BatchNormalization, Activation, ZeroPadding2D
 from keras.layers.advanced_activations import LeakyReLU
@@ -13,62 +12,17 @@ from keras.models import Sequential, Model
 from keras.optimizers import Adam
 from keras.utils import np_utils
 
-def to_categorical(y, num_classes=None, dtype='float32'):
-    """Converts a class vector (integers) to binary class matrix.
-    E.g. for use with categorical_crossentropy.
-    # Arguments
-        y: class vector to be converted into a matrix
-            (integers from 0 to num_classes).
-        num_classes: total number of classes.
-        dtype: The data type expected by the input, as a string
-            (`float32`, `float64`, `int32`...)
-    # Returns
-        A binary matrix representation of the input. The classes axis
-        is placed last.
-    # Example
-    ```python
-    # Consider an array of 5 labels out of a set of 3 classes {0, 1, 2}:
-    > labels
-    array([0, 2, 1, 2, 0])
-    # `to_categorical` converts this into a matrix with as many
-    # columns as there are classes. The number of rows
-    # stays the same.
-    > to_categorical(labels)
-    array([[ 1.,  0.,  0.],
-           [ 0.,  0.,  1.],
-           [ 0.,  1.,  0.],
-           [ 0.,  0.,  1.],
-           [ 1.,  0.,  0.]], dtype=float32)
-    ```
-    """
-
-    y = np.array(y, dtype='int')
-    input_shape = y.shape
-    if input_shape and input_shape[-1] == 1 and len(input_shape) > 1:
-        input_shape = tuple(input_shape[:-1])
-    y = y.ravel()
-    if not num_classes:
-        num_classes = np.max(y) + 1
-    n = y.shape[0]
-    categorical = np.zeros((n, num_classes), dtype=dtype)
-    categorical[np.arange(n), y] = 1
-    output_shape = input_shape + (num_classes,)
-    categorical = np.reshape(categorical, output_shape)
-    return categorical
-
-def get_notes(n_notes=3):
+def get_notes():
     """ Get all the notes and chords from the midi files """
     notes = []
 
-    for ii, file in enumerate(glob.glob("midi-lstm-gan-master/Pokemon MIDIs/*.mid")):
-        if ii > n_notes:
-            break
+    for file in glob.glob("midi-lstm-gan-master/Pokemon MIDIs/*.mid"):
         midi = converter.parse(file)
 
         print("Parsing %s" % file)
 
         notes_to_parse = None
-        # TODO: files are too long
+
         try: # file has instrument parts
             s2 = instrument.partitionByInstrument(midi)
             notes_to_parse = s2.parts[0].recurse() 
@@ -80,7 +34,7 @@ def get_notes(n_notes=3):
                 notes.append(str(element.pitch))
             elif isinstance(element, chord.Chord):
                 notes.append('.'.join(str(n) for n in element.normalOrder))
-        
+
     return notes
 
 def prepare_sequences(notes, n_vocab):
@@ -192,7 +146,6 @@ class GAN():
         self.discriminator.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
         # Build the generator
-        import pdb; pdb.set_trace()
         self.generator = self.build_generator()
 
         # The generator takes noise as input and generates note sequences
@@ -254,7 +207,7 @@ class GAN():
         # Load and convert the data
         notes = get_notes()
         n_vocab = len(set(notes))
-        X_train, _ = prepare_sequences(notes, n_vocab)
+        X_train, y_train = prepare_sequences(notes, n_vocab)
 
         # Adversarial ground truths
         real = np.ones((batch_size, 1))
@@ -322,15 +275,5 @@ class GAN():
         plt.close()
 
 if __name__ == '__main__':
-
-    gan = GAN(rows=100)    
-    # gan.train(epochs=5000, batch_size=32, sample_interval=1)
-    import pdb; pdb.set_trace()
-    # get_notes()
-    print('done')
-
-
-
-
-
-
+  gan = GAN(rows=100)    
+  gan.train(epochs=5000, batch_size=32, sample_interval=1)
