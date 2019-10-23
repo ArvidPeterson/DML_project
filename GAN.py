@@ -197,7 +197,7 @@ class GAN():
         # The generator takes noise as input and generates note sequences
         z = Input(shape=(self.latent_dim,))
         generated_seq = self.generator(z)
-
+        import pdb; pdb.set_trace()
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
 
@@ -251,14 +251,14 @@ class GAN():
     def train(self, epochs, batch_size=128, sample_interval=50):
 
         # Load and convert the data
-        notes = get_notes()
-        n_vocab = len(set(notes))
-        X_train, _ = prepare_sequences(notes, n_vocab)
+        notes       = get_notes()
+        n_vocab     = len(set(notes))
+        X_train, _  = prepare_sequences(notes, n_vocab)
 
         # Adversarial ground truths
         real = np.ones((batch_size, 1))
         fake = np.zeros((batch_size, 1))
-        
+
         # Training the model
         for epoch in range(epochs):
 
@@ -302,8 +302,8 @@ class GAN():
         int_to_note = dict((number, note) for number, note in enumerate(pitchnames))
         
         # Use random noise to generate sequences
-        noise = np.random.normal(0, 1, (1, self.latent_dim))
-        predictions = self.generator.predict(noise)
+        noise = torch.tensor(np.random.normal(0, 1, (1, self.seq_length))).float()
+        predictions = self.generator(noise)
         
         pred_notes = [x*242+242 for x in predictions[0]]
         pred_notes = [int_to_note[int(x)] for x in pred_notes]
@@ -321,7 +321,9 @@ class GAN():
         plt.close()
 
 if __name__ == '__main__':
-    gan = GAN(rows=100)    
+    notes = get_notes()
+    gan = GAN(rows=100)
+    gan.generate(input_notes = notes)    
     # gan.train(epochs=5000, batch_size=32, sample_interval=1)
     import pdb; pdb.set_trace()
     # get_notes()
