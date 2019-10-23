@@ -17,6 +17,7 @@ torchvision = "*"
 tensorflow = "*"
 keras = "*"
 music21 = "*"
+matplotlib2tikz = "*"
 
 [requires]
 python_version = "3.7"
