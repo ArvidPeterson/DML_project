@@ -156,21 +156,10 @@ class Discriminator(nn.Module):
         self.sequence_length = n_units
         self.LSTM_hidden_dim = 512
 
-        # self.LSTM_1 = nn.LSTM(
-        #     self.sequence_length, 
-        #     self.LSTM_hidden_dim
-        #     )
-        # self.LSTM_2 = nn.LSTM(
-        #     self.LSTM_hidden_dim,
-        #     self.LSTM_hidden_dim,
-        #     bidirectional=True
-        #     )
-
         self.LSTM = nn.LSTM(
             input_size=self.sequence_length, 
             hidden_size=self.LSTM_hidden_dim,
-            num_layers=2,
-            # batch_first=True
+            num_layers=2
             )
 
         self.linear_layers = nn.Sequential(
@@ -241,7 +230,7 @@ class torchGAN():
         # create discriminator and generator 
         self.discriminator = Discriminator(self.sequence_length) # LSTM + fc
         self.generator = Generator(self.sequence_length) # fc
-        self.optimizer_generator = optim.Adam(self.generator.parameters(), lr = learning_rate)
+        self.optimizer_generator = optim.Adam(self.generator.parameters(), lr=learning_rate)
         self.optimizer_discriminator = optim.Adam(self.discriminator.parameters(), lr=learning_rate)
     
     def train(self, n_epochs, batch_size=128, sample_interval=50):
@@ -256,18 +245,19 @@ class torchGAN():
 
         discriminator_epoch_loss = []
         generator_epoch_loss = []
+        
+        gen_loss_per_batch_total = []
+        disc_loss_per_batch_total = []
 
 
         # Training the model
         for i_epoch in range(n_epochs):
             gen_loss_per_batch = []
             disc_loss_per_batch = []
-            gen_loss_per_batch_total = []
-            disc_loss_per_batch_total = []
             n_batches_in_epoch = X_train.shape[0] // batch_size
             for i_batch in range(n_batches_in_epoch):
 
-                sys.stdout.write(f"\r at batch: {i_batch} / {n_batches_in_epoch} in epoch {i_epoch} / {n_epochs}")
+                sys.stdout.write(f"\rat batch: {i_batch} / {n_batches_in_epoch} in epoch {i_epoch + 1} / {n_epochs}")
                 sys.stdout.flush()
                 # ------------------------------------
                 # Training the discriminator
@@ -314,11 +304,11 @@ class torchGAN():
                 disc_loss_per_batch.append(loss_disc)
                 gen_loss_per_batch.append(loss_gen)
 
-            disc_loss_per_batch_total += disc_loss_per_batch
-            gen_loss_per_batch_total += gen_loss_per_batch_total
+            disc_loss_per_batch_total   += disc_loss_per_batch
+            gen_loss_per_batch_total    += gen_loss_per_batch
             
-            avg_gen_loss = sum(gen_loss_per_batch) / len(gen_loss_per_batch)
-            avg_disc_loss = sum(disc_loss_per_batch) / len(disc_loss_per_batch)
+            avg_gen_loss    = sum(gen_loss_per_batch) / len(gen_loss_per_batch)
+            avg_disc_loss   = sum(disc_loss_per_batch) / len(disc_loss_per_batch)
             
             generator_epoch_loss.append(avg_gen_loss)
             discriminator_epoch_loss.append(avg_disc_loss)
@@ -345,7 +335,6 @@ class torchGAN():
         predictions = self.generator(noise)
         
         #network_input = (network_input - float(n_vocab)/2) / (float(n_vocab)/2)
-        import pdb; pdb.set_trace()
         pred_notes = [x * (n_vocab - 1) / 2 + n_vocab / 2 for x in predictions[0]][0]
         #pred_notes = [(x + 1)*189//2 for x in predictions[0]] # 242+242
         # import pdb; pdb.set_trace()
@@ -375,16 +364,20 @@ class torchGAN():
         disc_plot = ax.plot(epochs, discriminator_epoch_loss, label='Discriminator')
         gen_plot = ax.plot(epochs, generator_epoch_loss, label='Generator')
         ax.legend()
-        plt.draw()
-        plt.pause(0.01)
-        import pdb; pdb.set_trace()
+        ax.grid()
+        ax.set_xlabel('batch')
+        ax.set_ylabel('loss')
+        ax.set_title('Loss versus batch')
+        plt.show()
+        # plt.draw()
+        # plt.pause(0.01)
         print(' ')
     
     
 if __name__ == '__main__':
 
     gan = torchGAN(n_units=GLOBAL_SEQUENCE_LENGTH)
-    gan.train(4)
+    gan.train(15)
     # notes = get_notes()
     # gan.generate(input_notes=notes)   
     # gan.train(n_epochs=3)
