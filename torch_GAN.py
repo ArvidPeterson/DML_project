@@ -126,7 +126,6 @@ def create_midi(prediction_output, filename):
         pattern = item#[0]
         # pattern is a chord
         if ('.' in pattern) or pattern.isdigit():
-            # import pdb; pdb.set_trace()
             notes_in_chord = pattern.split('.')
             notes = []
             for current_note in notes_in_chord:
@@ -249,6 +248,10 @@ class torchGAN():
         gen_loss_per_batch_total = []
         disc_loss_per_batch_total = []
 
+        sequences_to_count_chords_in = []
+
+        on_fake_accuracy = []
+        on_real_accuracy = []
 
         # Training the model
         for i_epoch in range(n_epochs):
@@ -264,14 +267,14 @@ class torchGAN():
                 # Select a random batch of note sequences
                 self.optimizer_discriminator.zero_grad()
 
-                idx = np.random.randint(0, X_train.shape[0], batch_size)
+                idx = np.random.randint(0, X_train.shape[0], batch_size) # TODO: make better generation of batches
                 real_seqs = X_train[idx] # batch of real music sequences 
                 real_seqs = torch.tensor(real_seqs)
                 real_seqs = torch.stack([real_seqs]).float()
                 
                 # train on real data
                 real_d = self.discriminator(real_seqs)
-                loss_disc = loss_func(real_d[0], label_real)
+                loss_disc = 0.5 * loss_func(real_d[0], label_real)
 
                 # train on fake data 
                 noise = torch.tensor(np.random.normal(0, 1, (batch_size, self.sequence_length))).float()
@@ -280,11 +283,11 @@ class torchGAN():
                     fake_seqs = self.generator(noise)
                 # fake_seqs = torch.stack([fake_seqs]).float()
                 # import pdb; pdb.set_trace()
-                fake_d = self.discriminator(fake_seqs)
-                loss_disc += loss_func(fake_d[0], label_fake)  # add losses and update
+                fake_d_1 = self.discriminator(fake_seqs)
+                loss_disc += 0.5 * loss_func(fake_d_1[0], label_fake)  # add losses and update
                 loss_disc.backward()
                 self.optimizer_discriminator.step()
-
+                # fake_assess = fake_d
                 # ------------------------------------
                 # Training the generator           
                 self.optimizer_discriminator.zero_grad()
@@ -304,6 +307,23 @@ class torchGAN():
                 disc_loss_per_batch.append(loss_disc)
                 gen_loss_per_batch.append(loss_gen)
 
+                if i_batch % 20:
+                    sequences_to_count_chords_in.append(fake_seqs[0])
+                
+                #import pdb; pdb.set_trace()
+
+                fake_acc = sum([np.round(d.item()) for d in fake_d_1[0]])
+                fake_acc /= 128  #batch_size
+                if fake_acc < 0.:
+                    print('FUCK OFF')
+                    print(f'fake_acc = {fake_acc}')
+                fake_acc = 1-fake_acc
+                on_fake_accuracy.append(fake_acc)
+
+                real_acc = sum([np.round(d.item()) for d in real_d[0]])
+                real_acc /= 128
+                on_real_accuracy.append(real_acc)
+
             disc_loss_per_batch_total   += disc_loss_per_batch
             gen_loss_per_batch_total    += gen_loss_per_batch
             
@@ -318,9 +338,15 @@ class torchGAN():
                     avg_disc_loss, avg_gen_loss, (i_epoch + 1), n_epochs)
             )
             
+        n_chords = self.count_cords_in_sequence(input_notes=notes, sequences = sequences_to_count_chords_in)
         
         self.generate(input_notes=notes)
-        self.draw_loss(disc_loss_per_batch_total, gen_loss_per_batch_total)
+        self.draw_loss(
+            disc_loss_per_batch_total, 
+            gen_loss_per_batch_total, 
+            n_epochs, 
+            on_real_accuracy, 
+            on_fake_accuracy)
 
 
     def generate(self, input_notes):
@@ -334,14 +360,12 @@ class torchGAN():
         noise = torch.tensor(np.random.normal(0, 1, (1, self.sequence_length))).float()
         predictions = self.generator(noise)
         
-        #network_input = (network_input - float(n_vocab)/2) / (float(n_vocab)/2)
         pred_notes = [x * (n_vocab - 1) / 2 + n_vocab / 2 for x in predictions[0]][0]
-        #pred_notes = [(x + 1)*189//2 for x in predictions[0]] # 242+242
-        # import pdb; pdb.set_trace()
         pred_notes = [int_to_note[int(x)] for x in pred_notes]
         print(f'pred_notes \n {pred_notes}')
         print(f'prediction \n {predictions}')
         create_midi(pred_notes, 'gan_final')
+    
     
     def sequence_to_midi(self, file_name, input_notes, sequence):
         notes = input_notes
@@ -350,24 +374,57 @@ class torchGAN():
         int_to_note = dict((number, note) for number, note in enumerate(pitchnames))
 
         pred_notes = [x * (n_vocab - 1) / 2 + (n_vocab - 1) / 2 for x in sequence[0]]
-        #pred_notes = [(x + 1)*189//2 for x in predictions[0]] # 242+242
-        import pdb; pdb.set_trace()
 
         pred_notes = [int_to_note[int(x)] for x in pred_notes]
         
         create_midi(pred_notes, file_name)
-
-    def draw_loss(self, discriminator_epoch_loss, generator_epoch_loss):
-        epochs = range(len(discriminator_epoch_loss))
+    
+    
+    def count_cords_in_sequence(self, input_notes, sequences):
+        '''
+        Counts the number of chords in a list of sequences
+        '''
+        notes = input_notes
+        n_vocab = len(set(notes))
+        pitchnames = sorted(set(item for item in notes))
+        int_to_note = dict((number, note) for number, note in enumerate(pitchnames))
         
-        fig, ax = plt.subplots(1,1)
-        disc_plot = ax.plot(epochs, discriminator_epoch_loss, label='Discriminator')
-        gen_plot = ax.plot(epochs, generator_epoch_loss, label='Generator')
-        ax.legend()
-        ax.grid()
-        ax.set_xlabel('batch')
-        ax.set_ylabel('loss')
-        ax.set_title('Loss versus batch')
+        n_chords_in_sequence = []
+        for sequence in sequences:
+            pred_notes = [x * (n_vocab - 1) / 2 + (n_vocab - 1) / 2 for x in sequence[0]]
+            #pred_notes = [(x + 1)*189//2 for x in predictions[0]] # 242+242
+            # import pdb; pdb.set_trace()
+
+            pred_notes = [int_to_note[int(x)] for x in pred_notes]
+            ctr = 0
+            for note in pred_notes:
+                
+                ctr += '.' in note
+            n_chords_in_sequence.append(ctr)
+            
+
+    def draw_loss(self, discriminator_epoch_loss, generator_epoch_loss, n_epochs, real_acc, fake_acc):
+        batches = np.array(list(range(len(discriminator_epoch_loss))))
+        epochs = n_epochs / len(discriminator_epoch_loss) * batches
+        fig_1, ax_1 = plt.subplots(1,1)
+        disc_plot = ax_1.plot(epochs, discriminator_epoch_loss, label='Discriminator')
+        gen_plot = ax_1.plot(epochs, generator_epoch_loss, label='Generator')
+        ax_1.legend()
+        ax_1.grid()
+        ax_1.set_xlabel('Epoch')
+        ax_1.set_ylabel('Loss')
+        ax_1.set_title('Loss vs. Epoch')
+        
+        fig_2, ax_2 = plt.subplots(1,1)
+        disc_plot = ax_2.plot(epochs, real_acc, label='Real accuracy')
+        gen_plot = ax_2.plot(epochs, fake_acc, label='Fake accuracy')
+        ax_2.legend()
+        ax_2.grid()
+        ax_2.set_xlabel('Epoch')
+        ax_2.set_ylabel('Loss')
+        ax_2.set_title('Discriminator Accuracy vs. Epoch')
+        
+        import pdb; pdb.set_trace()
         plt.show()
         # plt.draw()
         # plt.pause(0.01)
@@ -377,7 +434,7 @@ class torchGAN():
 if __name__ == '__main__':
 
     gan = torchGAN(n_units=GLOBAL_SEQUENCE_LENGTH)
-    gan.train(15)
+    gan.train(300)
     # notes = get_notes()
     # gan.generate(input_notes=notes)   
     # gan.train(n_epochs=3)

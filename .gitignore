@@ -3,3 +3,5 @@ pdf/
 .vscode/
 .DS_Store
 *.mid
+*.png
+.pkl
